@@ -48,7 +48,7 @@ namespace CsfEditor
         private async void Button_Click(object sender, RoutedEventArgs e)
         {
             var csf = ParseBuff(File.ReadAllBytes(src.Text));
-            await File.WriteAllTextAsync(dest.Text, JsonConvert.SerializeObject(csf));
+            await File.WriteAllTextAsync(dest.Text, JsonConvert.SerializeObject(csf, Formatting.Indented));
             MessageBox.Show("完成!");
         }
 
@@ -57,13 +57,14 @@ namespace CsfEditor
             MemoryStream ms = new MemoryStream(buff);
             var intBuff = new byte[4];
 
+            var csf = new Csf();
+            // 读取csf文件头
             ms.Read(intBuff, 0, 4);
-            var csfHeaderIdentifier = System.Text.Encoding.ASCII.GetString(intBuff, 0, 4);
-            if(csfHeaderIdentifier != " FSC")
+            csf.TagIdentifier = System.Text.Encoding.ASCII.GetString(intBuff, 0, 4);
+            if(csf.TagIdentifier != " FSC")
             {
                 return null;
             }
-            var csf = new Csf();
             ms.Read(intBuff, 0, 4);
             csf.CSFVersion = BitConverter.ToInt32(intBuff);
             ms.Read(intBuff, 0, 4);
@@ -78,46 +79,56 @@ namespace CsfEditor
 
             while (ms.Position<ms.Length)
             {
+                var label = new LabelHeader();
+                csf.LablelList.Add(label);
+
+                // 读取标签标头(Label header)
                 ms.Read(intBuff, 0, 4);
-                var labelIdentifier = System.Text.Encoding.ASCII.GetString(intBuff, 0, 4);
-                if(labelIdentifier != " LBL")
+                label.TagIdentifier = System.Text.Encoding.ASCII.GetString(intBuff, 0, 4);
+                if(label.TagIdentifier != " LBL")
                 {
+                    
+                    Debug.WriteLine($"识别错误 {ms.Position.ToString("X")}:{label.TagIdentifier}!");
                     continue;
                 }
-                var label = new Label();
-                csf.LablelList.Add(label);
                 ms.Read(intBuff, 0, 4);
                 label.Count = BitConverter.ToInt32(intBuff);
                 ms.Read(intBuff, 0, 4);
-                var labelNameLength = BitConverter.ToInt32(intBuff);
-                var labelNameBuff = new byte[labelNameLength];
-                ms.Read(labelNameBuff, 0, labelNameLength);
-                label.LabelName = System.Text.Encoding.ASCII.GetString(labelNameBuff, 0, labelNameLength);
+                label.LabelNameLength = BitConverter.ToInt32(intBuff);
+                var labelNameBuff = new byte[label.LabelNameLength];
+                ms.Read(labelNameBuff, 0, label.LabelNameLength);
+                label.LabelName = System.Text.Encoding.ASCII.GetString(labelNameBuff, 0, label.LabelNameLength);
 
+                // 读取值(Values)
                 for (int i = 0; i < label.Count; i++)
                 {
+                    var value = new LabelValue();
+                    label.LabelValues.Add(value);
                     ms.Read(intBuff, 0, 4);
-                    var valueIdentifier = System.Text.Encoding.ASCII.GetString(intBuff, 0, 4);
-                    if(valueIdentifier != " RTS" && valueIdentifier != "WRTS")
+                    value.TagIdentifier = System.Text.Encoding.ASCII.GetString(intBuff, 0, 4);
+                    if(value.TagIdentifier != " RTS" && value.TagIdentifier != "WRTS")
                     {
                         Debug.WriteLine($"label {label.LabelName} value {i} is error");
                         continue;
                     }
 
                     ms.Read(intBuff, 0, 4);
-                    var valueLength = BitConverter.ToInt32(intBuff) * 2;
-                    var valueBuff = new byte[valueLength];
-                    ms.Read(valueBuff, 0, valueLength);
-                    ConvertUnicode(valueBuff, 0, valueLength);
-                    label.ValueList.Add(System.Text.Encoding.Unicode.GetString(valueBuff));
-                    if(valueIdentifier == "WRTS")
+                    value.ValueLength = BitConverter.ToInt32(intBuff);
+                    //var valueLength = BitConverter.ToInt32(intBuff) * 2;
+                    var valueBuff = new byte[value.ValueLength * 2];
+                    ms.Read(valueBuff, 0, value.ValueLength * 2);
+                    ConvertUnicode(valueBuff, 0, value.ValueLength * 2);
+                    value.Value = System.Text.Encoding.Unicode.GetString(valueBuff);
+                    //label.ValueList.Add(System.Text.Encoding.Unicode.GetString(valueBuff));
+                    if(value.TagIdentifier == "WRTS")
                     {
                         ms.Read(intBuff, 0, 4);
-                        var valueExtLength = BitConverter.ToInt32(intBuff);
-                        var valueExtBuff = new byte[valueExtLength];
-                        ms.Read(valueExtBuff, 0, valueExtLength);
+                        value.ExtraValueLength = BitConverter.ToInt32(intBuff);
+                        //var valueExtLength = BitConverter.ToInt32(intBuff);
+                        var valueExtBuff = new byte[value.ExtraValueLength];
+                        ms.Read(valueExtBuff, 0, value.ExtraValueLength);
                         //ConvertUnicode(valueExtBuff, 0, valueExtLength);
-                        label.ExtraValueList.Add(System.Text.Encoding.ASCII.GetString(valueExtBuff));
+                        value.ExtraValue = System.Text.Encoding.ASCII.GetString(valueExtBuff);
                     }
                 }
             }
